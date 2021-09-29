@@ -77,35 +77,36 @@ class Planner:
         # TODO: FILL ME! implement obstacle inflation function and define self.aug_map = new_mask
 
         # you should inflate the map to get self.aug_map
-        self.aug_map = copy.deepcopy(self.map)
+        self.aug_map = np.copy(self.map) #copy.deepcopy(self.map)
         #from map to map_grid
         map_grid = np.zeros((self.world_width,self.world_height))
+        aug_grid = np.zeros((self.world_width,self.world_height))
+        
         for i in range(self.world_width):
             for j in range(self.world_height):
                 map_grid[i][j] = self.map[self.world_width*j + i]
                 aug_grid[i][j] = self.map[self.world_width*j + i]
-                if(map_grid == 100):
+                if(map_grid[i][j] == 100):
                     #inflate map_grid to aug_grid
+                    flag = flag +1
                     for k in range(self.inflation_ratio):
                         #left
                         if(i-k-1>=0):
                             aug_grid[i-k-1][j] = 100
                         #right
                         if(i+k+1<self.world_width):
-                            aug_grid[(i+k+1][j] = 100
+                            aug_grid[i+k+1][j] = 100
                         #up
                         if(j-k-1>=0):
                             aug_grid[i][j-k-1] = 100
                         #down
                         if(j+k+1<self.world_height):
                             aug_grid[i][j+k+1] = 100
+        
         #from aug_grid to aug_map
         for i in range(self.world_width):
             for j in range(self.world_height):
-                self.aug_map  
-
-        
-        
+                self.aug_map[self.world_width*j + i] = aug_grid[i][j]     
 
     def _pose_callback(self, msg):
         """get the raw pose of the robot from ROS
@@ -396,7 +397,8 @@ if __name__ == "__main__":
         resolution = 0.05
 
     # TODO: You should change this value accordingly
-    inflation_ratio = 3
+    inflation_ratio = int(ceil((ROBOT_SIZE/resolution))) #ori is 3
+    print("inflation ratio = ",inflation_ratio)
     planner = Planner(width, height, resolution, inflation_ratio=inflation_ratio)
     planner.set_goal(goal[0], goal[1])
     if planner.goal is not None:
