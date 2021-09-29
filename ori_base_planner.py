@@ -88,7 +88,6 @@ class Planner:
                 aug_grid[i][j] = self.map[self.world_width*j + i]
                 if(map_grid[i][j] == 100):
                     #inflate map_grid to aug_grid
-                    flag = flag +1
                     for k in range(self.inflation_ratio):
                         #left
                         if(i-k-1>=0):
@@ -254,7 +253,14 @@ class Planner:
         Returns:
             bool -- True for collision, False for non-collision
         """
-
+        grid_x,grid_y = int(x/self.world_resolution),int(y/self.world_resolution)
+        if(grid_x<=0 or grid_x>=self.world_width-1):
+            return True
+        elif(grid_y<=0 or grid_y>=self.world_height-1):
+            return True
+        elif(self.aug_map[self.world_width * grid_y + grid_x] == 100):
+            return True
+        print("no collision")
         return False
 
     def motion_predict(self, x, y, theta, v, w, dt=0.5, frequency=10):
