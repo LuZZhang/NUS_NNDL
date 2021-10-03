@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 import rospy
 import numpy as np
-
+import time
 from geometry_msgs.msg import *
 from nav_msgs.msg import *
 from sensor_msgs.msg import *
@@ -9,9 +9,6 @@ from const import *
 from math import *
 import copy
 import argparse
-from std_msgs.msg import *
-import heapq as hq
-import time
 
 ROBOT_SIZE = 0.2552  # width and height of robot in terms of stage unit
 
@@ -33,8 +30,8 @@ def dump_action_table(action_table, filename):
         json.dump(tab, fout)
 
 
-class Planner(object):
-    def __init__(self, world_width, world_height, world_resolution, inflation_ratio=3):
+class Planner:
+    def __init__(self, world_width, world_height, world_resolution, inflation_ratio):
         """init function of the base planner. You should develop your own planner
         using this class as a base.
 
@@ -57,14 +54,11 @@ class Planner(object):
         self.action_seq = None  # output
         self.aug_map = None  # occupancy grid with inflation
         self.action_table = {}
-        
-
 
         self.world_width = world_width
         self.world_height = world_height
         self.resolution = world_resolution
         self.inflation_ratio = inflation_ratio
-        self.grid=np.zeros((self.world_width,self.world_height))
         self.map_callback()
         self.sb_obs = rospy.Subscriber('/scan', LaserScan, self._obs_callback)
         self.sb_pose = rospy.Subscriber(
@@ -74,61 +68,46 @@ class Planner(object):
         self.controller = rospy.Publisher(
             '/mobile_base/commands/velocity', Twist, queue_size=10)
         rospy.sleep(1)
-        
-
 
     def map_callback(self):
         """Get the occupancy grid and inflate the obstacle by some pixels. You should implement the obstacle inflation yourself to handle uncertainty.
         """
         self.map = rospy.wait_for_message('/map', OccupancyGrid).data
-        #print(self.map)
+
         # TODO: FILL ME! implement obstacle inflation function and define self.aug_map = new_mask
 
-        # you should inflate the map to get self.aug_map
-        #self.aug_map = copy.deepcopy(self.map)
-        self.aug_map=np.copy(self.map)
-        print("Map call back")
-        old_grid=np.zeros((self.world_width,self.world_height))
+        # you should inflate the map to get self.aug_map\
+        print("start map_callback")
+        self.aug_map = np.copy(self.map) #copy.deepcopy(self.map)
+        #from map to map_grid
+        #map_grid = np.zeros((self.world_width,self.world_height))
+        aug_grid = np.zeros((self.world_width,self.world_height))
+        
+        flag1 = 0
         for i in range(self.world_width):
             for j in range(self.world_height):
-                self.grid[i][j]=self.aug_map[j*self.world_width+i]
-                old_grid[i][j]=self.grid[i][j]
+                #map_grid[i][j] = self.map[self.world_width*j + i]
+                #aug_grid[i][j] = self.map[self.world_width*j + i]
+                if(self.map[self.world_width*j + i] == 100): 
+                    for k in range(self.inflation_ratio):
+                        #left
+                        if(i-k>0):
+                            aug_grid[i-k][j] = 100 
+                        #right
+                        if(i+k<self.world_width):
+                            aug_grid[i+k][j] = 100
+                        #up
+                        if(j-k>0):
+                            aug_grid[i][j-k] = 100
+                        #down
+                        if(j+k<self.world_height):
+                            aug_grid[i][j+k] = 100
+                            
+        
+        for i in range(self.world_width):
+            for j in range(self.world_height):
+                self.aug_map[self.world_width*j + i] = aug_grid[i][j]  
 
-        flag=1 
-        for i in range(self.world_width):
-            for j in range(self.world_height):
-                if(old_grid[i][j]==100):
-                    flag1=0
-                    for k in range(int(self.inflation_ratio)): 
-                        if (j+k < self.world_height):
-                            self.grid[i][j+k]=100
-                            #flag1 = flag1 + 1 
-                        if(j-k > 0):
-                            self.grid[i][j-k]=100
-                            #flag1 = flag1 + 1 
-                        if(i+k < self.world_width):
-                            self.grid[i+k][j]=100 
-                            #flag1 = flag1 + 1                            
-                        if(i-k > 0):
-                            self.grid[i-k][j]=100
-                            #flag1 = flag1 + 1
-                    #print("i,j,flag:",i,j,flag1)             
-                else:
-                    continue
-        #print("int(self.inflation_ratio) : ", int(self.inflation_ratio))
-        zero_num = 0
-        for i in range(self.world_width):
-            for j in range(self.world_height):
-                self.aug_map[j*self.world_width+i]=self.grid[i][j]
-                #if(self.grid[i][j]==100):
-                    #flag = flag + 1
-                #else:
-                    #zero_num = zero_num + 1
-        #print("flag:",flag)
-        #print("zeros:",zero_num)
-        #print("Size : " , self.aug_map.shape,self.world_width,self.world_height )
-        #for i in range(self.world_width):
-            #print(self.aug_map[i*self.world_height:(i+1)*self.world_height])
 
     def _pose_callback(self, msg):
         """get the raw pose of the robot from ROS
@@ -191,7 +170,7 @@ class Planner(object):
         Returns:
             bool -- goal or not
         """
-        if self._d_from_goal(pose) < 0.5:
+        if self._d_from_goal(pose) < 0.25:
             return True
         else:
             return False
@@ -219,26 +198,6 @@ class Planner(object):
         message.angular.z = az
         return message
 
-
-    def check_posibility(self,x,y,direction):
-        total_dis = 1 #Distance travelled by robot in pixels
-        total_step = int(total_dis/self.resolution) #total steps wrt to resolution
-        
-        for step_count in range(0,total_step+1 ,1):
-            step_diff = step_count * self.resolution #the distance travelled 
-            step_location = [(x+step_diff,y), (x,y+step_diff), (x-step_diff,y), (x,y-step_diff)]
-            if self.collision_checker(step_location[direction][0], step_location[direction][1]):
-                # if there is collision, then cannot move forward
-                return False
-
-        return True
-
-
-
-    def heuristic (self,x,g):
-
-        return abs(x[0]-g[0])+abs(x[1]-g[1])
-
     def generate_plan(self):
         """TODO: FILL ME! This function generates the plan for the robot, given a goal.
         You should store the list of actions into self.action_seq.
@@ -252,130 +211,7 @@ class Planner(object):
 
         Each action could be: (v, \omega) where v is the linear velocity and \omega is the angular velocity
         """
-        # Publish inflated map in a topic
-        print("start to generate plan")
-        test_map = OccupancyGrid()
-        test_map.info.resolution = self.resolution
-        test_map.info.width = self.world_width
-        test_map.info.height = self.world_height
-        test_map.info.origin.position.x = 0.0 
-        test_map.info.origin.position.y = 0.0 
-        test_map.info.origin.position.z = 0.0 
-        test_map.info.origin.orientation.x = 0.0 
-        test_map.info.origin.orientation.y = 0.0 
-        test_map.info.origin.orientation.z = 0.0 
-        test_map.info.origin.orientation.w = 0.0 
-        for i in range(self.world_width*self.world_height):
-            test_map.data.append(self.aug_map[i])
-        #test_map.data = self.aug_map
-        map_pub = rospy.Publisher('/map_inf', OccupancyGrid,latch=True,queue_size=10)
-        map_pub.publish(test_map)
-
         self.action_seq = []
-        possible_neighbour=[[1,0],[0,1],[0,-1]]
-        cost_updates =[0.8,1,1.2] # Prefer to move more straight when the cost of turning and straight is same
-        openheap=[] # would be grid position of nodes that is not explored, (grid_pos,cost)
-        openheapCost={} # parent(grid_pos) - key and value as the cost of the exploration
-        visitedNodes={} # parent(grid_pos) - key and value as the cost of the exploration
-        dirNode={}
-
-        posStart=self.get_current_discrete_state()
-        xStart = posStart[0] #int(ceil(posStart[0]/self.resolution))
-        yStart = posStart[1] #int(ceil(posStart[1]/self.resolution))
-        tStart = posStart[2]
-
-        posGoal=self._get_goal_position()
-        xGoal= posGoal[0] #int(ceil(posGoal[0]/self.resolution))
-        yGoal=posGoal[1]#int(ceil(posGoal[1]/self.resolution))
-        tGoal=0
-
-        startpos=(xStart,yStart,tStart)
-        goalpos=(xGoal,yGoal,tGoal)
-
-        print("Starting Pos :", startpos , "  and Goal : " , goalpos )
-        if(self.collision_checker(startpos[0],startpos[1]) or self.collision_checker(goalpos[0],goalpos[1])):
-            print(" Robot is start or Goal position near to obstacle, High chance of collision thus no path found !!!")
-            return
-
-        hq.heappush(openheap,(self.heuristic(startpos,goalpos),(startpos),[]))
-        openheapCost[startpos]=(self.heuristic(startpos,goalpos),(startpos),[])
-        final_path=[]
-
-        while len(openheap)>0:
-            
-            selectedNode=openheap[0] # Select the top node
-            
-            nodePos=selectedNode[1] # would be in x,y, theta
-            cost=selectedNode[0]
-            action_taken = selectedNode[2]
-
-            #visitedNodes[nodePos]=openheapCost[nodePos]
-            
-            # if goal is reached
-            if goalpos in visitedNodes:
-                self.action_seq = visitedNodes[goalpos][2]
-                print("self.action_seq : " ,self.action_seq)
-                break
-            
-            #print(" openheap Current : " , openheap[0])
-            hq.heappop(openheap)
-            for i in range(0,3):
-                
-                #print("exploring neighbour for the node : " , nodePos)
-                gn = cost - self.heuristic(nodePos,goalpos)
-
-                x = nodePos[0]
-                y = nodePos[1]
-                theta = nodePos[2]
-                
-                if possible_neighbour[i] == [1,0]:
-                    # moves forward  
-                    if(not (self.check_posibility(x,y,theta) )):
-                        continue                
-                    next_locations = [(x + 1, y), (x, y + 1), (x - 1, y), (x, y - 1)]
-                    new_x, new_y = next_locations[theta]  # use theta as an index
-                    ngX,ngY,ngTheta = (new_x, new_y, theta) # theta is not changed
-
-                if possible_neighbour[i] == [0,1]:
-                    # left 90 degrees
-                    ngX,ngY,ngTheta = (x, y , (theta+1)%4)
-                if possible_neighbour[i] == [0,-1]:
-                    ngX,ngY,ngTheta = (x,y, (theta-1)%4)              
-
-                ngNode=(ngX,ngY,ngTheta)
-
-                
-                if(ngX >= 0 and ngX < self.world_width and ngY >= 0 and ngY < self.world_height):
-                    if(self.collision_checker(ngX,ngY)):
-
-                        continue
-                    else:
-                        total_cost=gn+1+self.heuristic(ngNode,goalpos)#+cost_updates[i] #fn=gn+hn
-                        flag=0
-                        lo=0
-                        if ngNode in openheapCost:
-                            if total_cost > openheapCost[ngNode][0]:
-                                flag=1
-                            elif ngNode in visitedNodes:
-                                
-                                if total_cost > visitedNodes[ngNode][0]:
-                                    #print("Here : " ,visitedNodes ," \n")
-                                    lo=1
-
-                        if flag==0 and lo==0:
-                            
-                
-                            new_action_taken = action_taken + [possible_neighbour[i],]
-                            #print("(ngNode,total_cost) : ",ngNode,total_cost,"   new_action_taken : " , new_action_taken)
-                            
-                            hq.heappush(openheap,(total_cost,ngNode,new_action_taken))
-                            openheapCost[ngNode]=(total_cost,selectedNode,new_action_taken)
-                            visitedNodes[ngNode]=openheapCost[ngNode]
-                         
-            
-                
-                    
-        
 
     def get_current_continuous_state(self):
         """Our state is defined to be the tuple (x,y,theta). 
@@ -419,16 +255,14 @@ class Planner(object):
         Returns:
             bool -- True for collision, False for non-collision
         """
-        i=int(ceil(x/self.resolution))
-        j=int(ceil(y/self.resolution))
-        index = j*self.world_width +i
-        if i <= 0 or i >= ceil(self.world_width - 1):
+        grid_x,grid_y = int(x/self.resolution),int(y/self.resolution)
+        if(grid_x<=0 or grid_x>=self.world_width-1):
             return True
-        elif j <= 0 or j >= ceil(self.world_height - 1):
+        elif(grid_y<=0 or grid_y>=self.world_height-1):
             return True
-        if(self.aug_map[index]==100):
+        elif(self.aug_map[self.world_width * grid_y + grid_x] == 100):
             return True
-    
+        #print("no collision")
         return False
 
     def motion_predict(self, x, y, theta, v, w, dt=0.5, frequency=10):
@@ -465,7 +299,7 @@ class Planner(object):
             y += dy
 
             if self.collision_checker(x, y):
-                return None 
+                return None
             theta += w / frequency
         return x, y, theta
 
@@ -505,7 +339,7 @@ class Planner(object):
         for action in self.action_seq:
             msg = self.create_control_msg(action[0], 0, 0, 0, 0, action[1])
             self.controller.publish(msg)
-            rospy.sleep(2)
+            rospy.sleep(0.6)
 
     def publish_discrete_control(self):
         """publish the discrete controls
@@ -519,18 +353,19 @@ class Planner(object):
             rospy.sleep(0.6)
 
     def publish_stochastic_control(self):
-        """publish stochastic controls in MDP. 
+        """publish stochastic controls in MDP.
         In MDP, we simulate the stochastic dynamics of the robot as described in the assignment description.
         Please use this function to publish your controls in task 3, MDP. DO NOT CHANGE THE PARAMETERS :)
         We will test your policy using the same function.
         """
         current_state = self.get_current_discrete_state()
-        actions = []
-        new_state = current_state
         while not self._check_goal(current_state):
+            # current_state = self.get_current_state()
             current_state = self.get_current_discrete_state()
             action = self.action_table[current_state[0],
                                        current_state[1], current_state[2] % 4]
+            print("current state", current_state)
+            print("action", action)
             if action == (1, 0):
                 r = np.random.rand()
                 if r < 0.9:
@@ -541,14 +376,15 @@ class Planner(object):
                     action = (np.pi/2, -1)
             print("Sending actions:", action[0], action[1]*np.pi/2)
             msg = self.create_control_msg(action[0], 0, 0, 0, 0, action[1]*np.pi/2)
+            # msg = create_control_msg(action[0], 0, 0, 0, 0, action[1]*np.pi/2)
             self.controller.publish(msg)
             rospy.sleep(0.6)
             self.controller.publish(msg)
             rospy.sleep(0.6)
             time.sleep(1)
+            # current_state = self.get_current_state()
             current_state = self.get_current_discrete_state()
 
-        self.action_seq = actions
 
 
 if __name__ == "__main__":
@@ -575,30 +411,22 @@ if __name__ == "__main__":
         resolution = 0.05
 
     # TODO: You should change this value accordingly
-    inflation_ratio = int(ceil((ROBOT_SIZE/resolution)))  # 1 is for safety
-    print("Inflation ratio : " , inflation_ratio)
-
-    planner = Planner(width, height, resolution, inflation_ratio=inflation_ratio)   
+    inflation_ratio = int(ceil((ROBOT_SIZE/resolution))) #ori is 3
+    #print("inflation ratio = ",inflation_ratio)
+    planner = Planner(width, height, resolution, inflation_ratio=inflation_ratio)
     planner.set_goal(goal[0], goal[1])
     if planner.goal is not None:
         planner.generate_plan()
 
     # You could replace this with other control publishers
-    #planner.publish_discrete_control()
+    planner.publish_discrete_control()
 
     # save your action sequence
     result = np.array(planner.action_seq)
-    txtname = "Controls/DSDA_com1_"+ str(planner.goal.pose.position.x) + "_" +str(planner.goal.pose.position.y)+".txt"
-    np.savetxt(txtname, result, fmt="%.2e")
-    print("save to file:",txtname)
-    #np.savetxt("task_1.txt", result, fmt="%.2e")
+    np.savetxt("actions_continuous.txt", result, fmt="%.2e")
 
-    # You could replace this with other control publishers
-    planner.publish_discrete_control()
-    
     # for MDP, please dump your policy table into a json file
     # dump_action_table(planner.action_table, 'mdp_policy.json')
-    print("Done")
+
     # spin the ros
     rospy.spin()
- 

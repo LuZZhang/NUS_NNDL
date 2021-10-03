@@ -9,7 +9,7 @@ from const import *
 from math import *
 import copy
 import argparse
-from ori_base_planner import Planner as base_planner
+from base_planner import Planner as base_planner
 import heapq as hq
 ROBOT_SIZE = 0.2552  # width and height of robot in terms of stage unit
 
@@ -181,7 +181,7 @@ if __name__ == "__main__":
 
     # TODO: You should change this value accordingly
     inflation_ratio = int(ceil((ROBOT_SIZE/resolution))) #ori is 3
-    print("inflation ratio = ",inflation_ratio)
+    #print("inflation ratio = ",inflation_ratio)
     
     planner = AstarPlanner(width, height, resolution, inflation_ratio=inflation_ratio)
     planner.set_goal(goal[0], goal[1])
